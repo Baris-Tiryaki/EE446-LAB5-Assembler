@@ -1,0 +1,221 @@
+<html>
+<head>
+<script>
+
+function getReg(str){
+ var num=-1;
+ switch(str) {
+  case "R0":	num=0;  break;
+  case "R1":	num=1;  break;
+  case "R2":	num=2;  break;
+  case "R3":	num=3;  break;
+  case "R4":	num=4;  break;
+  case "R5":	num=5;  break;
+  case "R6":	num=6;  break;
+  case "R7":	num=7;  break;
+  case "LR":	num=6;  break;
+  case "PC":	num=7;  break;
+ }
+ if(num==-1) throw "Register name wrong: "+str;
+ return num;
+}
+
+function getRegBracket(str){
+ var num=-1;
+ if(str[0]!='[' || str[str.length-1]!=']') throw "Bracket error: "+str;
+ return getReg(str.substr(1,str.length-2));
+}
+
+function getImm8(str){
+ var orjStr=str;
+ if(str[0]=='#') str = str.substr(1);
+
+ var base = 10;
+ if(str.startsWith('0X')){
+  str = str.substr(2);
+  if(str.match(/^[0-9A-F]+$/) == null) throw "Error in imm8 (16): "+orjStr;
+  base = 16;
+ }
+ else if(str.startsWith('0B')){
+  str = str.substr(2);
+  if(str.match(/^[0-1]+$/) == null) throw "Error in imm8 (2): "+orjStr;
+  base = 2;
+ }
+ else{
+  if(str.match(/^[0-9]+$/) == null) throw "Error in imm8 (10): "+orjStr;
+  base = 10;
+ }
+ var num = parseInt(str, base);
+ if(num>=0 && num<=255) return num;
+ else throw "Imm8 error: "+str;
+}
+
+function encode1(str){
+ str = str.replaceAll(',',' ').toUpperCase();
+ str = str.split(';')[0];
+ words = str.split(' ').filter(i => i)
+ 
+ var mnem = words[0];
+ words = words.slice(1);
+ var op=-1, cmd=-1, Rd=-1, Rs1=-1, Rs2=-1, imm8=-1;
+ switch(mnem) {
+  case "CLR":	op=0; cmd=1;  break;
+  case "SHFL":	op=0; cmd=2;  break;
+  case "ROTL":	op=0; cmd=3;  break;
+  case "SHFR":	op=0; cmd=4;  break;
+  case "ROTR":	op=0; cmd=5;  break;
+  case "SHFAR":	op=0; cmd=6;  break;
+  case "ADD":	op=0; cmd=8;  break;
+  case "SUB":	op=0; cmd=9;  break;
+  case "ADDI":	op=0; cmd=10;  break;
+  case "SUBI":	op=0; cmd=11;  break;
+  case "AND":	op=0; cmd=12;  break;
+  case "OR":	op=0; cmd=13;  break;
+  case "XOR":	op=0; cmd=14;  break;
+  
+  case "STR":	op=1; cmd=0;  break;
+  case "LDR":	op=1; cmd=1;  break;
+  case "MOV":	op=1; cmd=2;  break;
+
+  case "B":	op=2; cmd=0;  break;
+  case "BL":	op=2; cmd=1;  break;
+  case "BI":	op=2; cmd=2;  break;
+  case "BZ":	op=2; cmd=4;  break;
+  case "BNZ":	op=2; cmd=5;  break;
+  case "BC":	op=2; cmd=6;  break;
+  case "BNC":	op=2; cmd=7;  break;
+
+  case "END":	op=3; cmd=0;  break;
+ }
+ if(op==-1) throw "Mnemonic ("+mnem+") is wrong!";
+
+ if(op == 0){
+  if(cmd<=6){  //CLR
+   if(words.length!=1) throw "Number of arguments is wrong: "+str;
+   Rd = getReg(words[0])
+  }
+  else if(cmd>=10 && cmd<=11){  //ADDI SUBI
+   if(words.length!=3) throw "Number of arguments is wrong: "+str;
+   Rd = getReg(words[0])
+   Rs1 = getReg(words[1]);
+   Rs2 = getRegBracket(words[2])
+  }
+  else{  //ADD
+   if(words.length!=3) throw "Number of arguments is wrong: "+str;
+   Rd = getReg(words[0])
+   Rs1 = getReg(words[1])
+   Rs2 = getReg(words[2])
+  }
+ }
+ else if(op == 1){
+  if(cmd == 0 || cmd==1){ // LDR STR
+   if(words.length!=2) throw "Number of arguments is wrong: "+str;
+   Rd = getReg(words[0]);
+   Rs2 = getRegBracket(words[1]);
+  }
+  else if(cmd==2){ //MOV
+   if(words.length!=2) throw "Number of arguments is wrong: "+str;
+   Rd = getReg(words[0]);
+   imm8 = getImm8(words[1]);
+  }
+ }
+ else if(op == 2){
+  if(cmd==2){   //BI
+   if(words.length!=1) throw "Number of arguments is wrong: "+str;
+   Rs2 = getRegBracket(words[0]);
+  }
+  else{
+   if(words.length!=1) throw "Number of arguments is wrong: "+str;
+   imm8 = getImm8(words[0]);
+  }
+ }
+ else if(op == 3){
+  if(words.length!=0) throw "Number of arguments is wrong: "+str;
+ }
+ return [op, cmd, Rd, Rs1, Rs2, imm8];
+}
+
+function encode2(op, cmd, Rd, Rs1, Rs2, imm8){
+ if((Rs1>=0 && imm8>=0) || (Rs2>=0 && imm8>=0)) throw "Rs1 Rs2 Imm8 collision!";
+ var instr = 0;
+ instr += op<<14;
+ if(Rd>=0) instr += Rd<<11;
+ if(cmd>=0){
+  if(op==0) instr += cmd<<7;
+  else      instr += cmd<<8;
+ }
+ if(Rs1>=0) instr += Rs1<<3;
+ if(Rs2>=0) instr += Rs2;
+ if(imm8>=0) instr += imm8;
+
+ return instr;
+}
+
+function encode(str){
+ var res1 = encode1(str);
+ var res2 = encode2(res1[0], res1[1], res1[2], res1[3], res1[4], res1[5]);
+ return res2;
+}
+
+function encodeLines(str){
+ var strs = str.split('\n').filter(i => i)
+ var result=[], binary="", hex="";
+ for(var i=0; i<strs.length; i++){
+  var line = strs[i];
+  try{
+   var res = encode(line);
+   result.push(res);
+
+   str1 = res.toString(2);
+   while(str1.length<16) str1 = "0"+str1;
+   str1 = "0b"+str1;
+   binary += str1+"\n";
+
+   str1 = res.toString(16);
+   while(str1.length<2) str1 = "0"+str1;
+   str1 = "0x"+str1;
+   hex += str1+"\n";
+  }
+  catch(err){
+   result.push(-1);
+   binary += "\n";
+   hex += "\n";
+   console.error("Error at Line "+(i+1)+" :  "+err);
+   T4.value += "Error at Line "+(i+1)+" :  "+err + "\n";
+  }
+ }
+ return [result, binary, hex];
+}
+
+var T1, T2, T3, T4;
+function B1Click(){
+ T1 = document.getElementById("T1");
+ T2 = document.getElementById("T2");
+ T3 = document.getElementById("T3");
+ T4 = document.getElementById("T4");
+ T4.value="";
+
+ var code = T1.value;
+ var res = encodeLines(code);
+ 
+ console.log(res[0]);
+ T2.value = res[1];
+ T3.value = res[2];
+}
+
+</script>
+</head>
+
+<body>
+<textarea id="T1" rows="10" cols="83">Write your assembly code here</textarea> <br>
+
+<button id="B1" onclick="B1Click();"> convert </button> <br>
+
+<textarea id="T2" rows="10" cols="40">Binary</textarea>
+<textarea id="T3" rows="10" cols="40">Hex</textarea> <br>
+
+<textarea id="T4" rows="8" cols="83">Errors</textarea> <br>
+
+</body>
+
+</html>
